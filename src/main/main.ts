@@ -1128,7 +1128,10 @@ async function runM2Tests(win: BrowserWindow): Promise<Record<string, unknown>> 
       uncapped: +uncapped.toFixed(1),
       capped30: +capped30.toFixed(1),
       capped60: +capped60.toFixed(1),
-      pass: capped30 <= 36 && capped30 >= 22 && capped60 > capped30 - 2,
+      // 判定必须能在软件渲染（CI 的 runner 无 GPU）下成立：只看"上限是否真的起作用"，
+      // 不要求实际达到目标帧率 —— 单帧渲染本身就比 33ms 慢时，30fps 的上限只能给出更低的值
+      // （实测 runner 上 capped30=21.9fps，本地 GPU 上是 27.3fps，两者都属正常）。
+      pass: capped30 <= 36 && capped30 <= uncapped * 0.8 && capped60 > capped30 * 1.1,
     };
   } catch (e) {
     out.fpsCapTest = { error: String(e) };
