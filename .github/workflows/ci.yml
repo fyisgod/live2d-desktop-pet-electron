@@ -29,9 +29,11 @@ jobs:
       - name: 安装依赖
         run: npm ci --ignore-scripts
 
-      - name: 获取官方 Cubism SDK 并 vendor（不随仓库分发）
+      # CI 出口访问不到 cubism.live2d.com，因此这里用官方 GitHub 仓库兜底拿 Framework
+      # （类型检查与构建只需要 Framework；Core 只在官方 zip 里，冒烟作业用不到时如实跳过）
+      - name: 获取 Cubism SDK Framework（官方 GitHub 仓库，不随仓库分发）
         run: |
-          node tools/fetch-sdk.cjs
+          node tools/fetch-sdk.cjs --github
           node tools/vendor-sdk.cjs
 
       - name: 类型门禁（src/ 必须零错误）
@@ -68,10 +70,14 @@ jobs:
       - name: 下载 Electron 二进制
         run: node tools/fetch-electron.cjs
 
-      - name: 获取官方 Cubism SDK 并 vendor
-        run: |
-          node tools/fetch-sdk.cjs
-          node tools/vendor-sdk.cjs
+      # 先试官方 zip（唯一带 Core 的来源）；拿不到就让后续步骤如实跳过，
+      # 不把"网络不可达"伪装成"端到端通过"
+      - name: 获取 Cubism SDK（官方 zip，失败则回退 GitHub Framework）
+        continue-on-error: true
+        run: node tools/fetch-sdk.cjs
+
+      - name: vendor SDK
+        run: node tools/vendor-sdk.cjs
 
       - name: 构建
         run: node tools/build.cjs

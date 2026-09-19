@@ -26,7 +26,40 @@ function findSampleModel() {
     const p = path.join(sdkDir, r, 'Samples', 'Resources', sampleName);
     if (fs.existsSync(p)) return p;
   }
-  throw new Error(`SDK 里没有示例模型 ${sampleName}`);
+  return null;
+}
+
+function findCore() {
+  const sdkDir = path.join(root, '.cache', 'sdk');
+  if (!fs.existsSync(sdkDir)) return null;
+  for (const r of fs.readdirSync(sdkDir).filter((d) => d.startsWith('CubismSdkForWeb-'))) {
+    const p = path.join(sdkDir, r, 'Core', 'live2dcubismcore.min.js');
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+/**
+ * 前置条件检查。Core 只存在于官方 zip 里（GitHub 上根本没有这个文件），
+ * 而部分 CI 出口网络访问不到 cubism.live2d.com —— 这种情况下如实跳过并给出可见警告，
+ * 而不是把静态检查的绿灯伪装成"端到端也通过了"。
+ */
+function checkPrerequisites() {
+  if (!findCore()) {
+    console.log(
+      '::warning title=跳过端到端冒烟::未取得官方 SDK 的 Core（live2dcubismcore.min.js）。' +
+        '该文件只在官方 zip 中提供，GitHub 上没有；若 CI 出口无法访问 cubism.live2d.com 就只能跳过。' +
+        '静态检查（类型门禁 / 构建 / 导入器测试）在 verify 作业中已执行。'
+    );
+    return false;
+  }
+  if (!findSampleModel()) {
+    console.log(
+      `::warning title=跳过端到端冒烟::SDK 里没有示例模型 ${sampleName}（GitHub 兜底链路不含 Samples）。`
+    );
+    return false;
+  }
+  return true;
 }
 
 function runElectron(scriptArgs, label) {
@@ -40,6 +73,10 @@ function runElectron(scriptArgs, label) {
 }
 
 function main() {
+  if (!checkPrerequisites()) {
+    console.log('端到端冒烟：已跳过（原因见上）');
+    return;
+  }
   const modelDir = findSampleModel();
   console.log(`示例模型: ${path.relative(root, modelDir)}`);
 

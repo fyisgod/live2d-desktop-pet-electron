@@ -33,9 +33,13 @@ if (!sdk) {
 
 const sdkName = path.basename(sdk);
 fs.rmSync(outDir, { recursive: true, force: true });
-copyDir(path.join(sdk, 'Core'), path.join(outDir, 'Core'));
+const hasCore = fs.existsSync(path.join(sdk, 'Core'));
+if (hasCore) copyDir(path.join(sdk, 'Core'), path.join(outDir, 'Core'));
+else console.warn('注意：本次 SDK 来源不含 Core（GitHub 兜底链路），只能做类型检查/构建，无法真实渲染');
 copyDir(path.join(sdk, 'Framework', 'src'), path.join(outDir, 'Framework', 'src'));
-copyDir(path.join(sdk, 'Framework', 'Shaders'), path.join(outDir, 'Framework', 'Shaders'));
+if (fs.existsSync(path.join(sdk, 'Framework', 'Shaders'))) {
+  copyDir(path.join(sdk, 'Framework', 'Shaders'), path.join(outDir, 'Framework', 'Shaders'));
+}
 for (const f of ['LICENSE.md', 'README.md', 'CHANGELOG.md']) {
   const src = path.join(sdk, 'Framework', f);
   if (fs.existsSync(src)) fs.copyFileSync(src, path.join(outDir, 'Framework', f));
@@ -48,6 +52,6 @@ for (const f of ['LICENSE.md', 'NOTICE.md', 'README.md', 'RedistributableFiles.t
 }
 fs.writeFileSync(
   path.join(outDir, 'VERSION.txt'),
-  `vendored from ${sdkName} (official download: https://cubism.live2d.com/sdk-web/bin/${sdkName}.zip)\n`
+  `vendored from ${sdkName}\nofficial download: https://cubism.live2d.com/sdk-web/bin/${sdkName}.zip\nhasCore: ${hasCore}\n`
 );
-console.log(`vendored ${sdkName} -> vendor/cubism`);
+console.log(`vendored ${sdkName} -> vendor/cubism (Core: ${hasCore ? '有' : '无'})`);
