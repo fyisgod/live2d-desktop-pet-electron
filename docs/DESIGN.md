@@ -181,13 +181,54 @@ const win = new BrowserWindow({
 
 ## 5. 里程碑
 
-| 阶段 | 内容 | 验收标准 |
-|---|---|---|
-| **M0 尖刺验证**（1–2 天） | Electron 透明窗口 + 官方 SDK R5 加载本模型（2048 贴图），静态显示 | ① 本机透明合成正常（无黑底/灰条）；② 稳定 ≥30 FPS；③ 打印 `MAX_TEXTURE_SIZE`、draw call、估算显存；④ 手动切 3 个表情、放 1 个动作 |
-| **M1 运行时 + 导入器** | pack 生成（含降采样）、眨眼/呼吸/物理/视线、表情与动作播放、窗口拖拽、点击穿透、托盘 | 一条命令导入示例模型目录后可直接出桌宠；穿透在模型外区域 100% 生效 |
-| **M2 交互与配置** | 动作/表情/换装面板、命中区编辑器、参数快照预设、缩放位置持久化、遮挡层叠加、置顶层级、多显示器 | 49 个表情 + 6 个动作全部可用且可改名/改键；遮挡层可一键开关 |
-| **M3 行为与扩展** | 随机 idle 行为、桌面漫步、点击反应、多模型切换、麦克风口型（RMS→`ParamMouthOpenY`）、TTS/AI 对话钩子（插件式，**不把模型数据外传**） | 挂机 1 小时无内存增长；口型延迟 <100 ms |
-| **M4 打包发布** | electron-builder NSIS/便携版、首次运行向导（选模型目录）、自启、诊断页、Live2D 版权声明与授权提示 | 干净机器上装完即可用 |
+| 阶段 | 内容 | 验收标准 | 状态 |
+|---|---|---|---|
+| **M0 尖刺验证** | Electron 透明窗口 + 官方 SDK R5 加载示例模型（2048 贴图），静态显示 | 透明合成正常、≥30 FPS、打印 `MAX_TEXTURE_SIZE`/显存、切表情与放动作 | ✅ 已完成（§8） |
+| **M1 运行时 + 导入器** | pack 生成（含降采样）、眨眼/呼吸/物理/视线、表情与动作播放、窗口拖拽、点击穿透、托盘 | 一条命令导入模型目录即可出桌宠；穿透在模型外区域生效 | ✅ 已完成（§8） |
+| **M2 交互与配置** | 动作/表情/换装面板、参数快照预设、缩放与位置持久化、遮挡层叠加、帧率上限、互斥分组 | 表情/动作全部可用；开关可互斥；遮挡层一键开关 | ✅ 已完成（§8，含用户报的"动作切换素材叠放"修复） |
+| **M3 行为与扩展** | 随机 idle 行为、桌面漫步、麦克风口型、TTS/AI 对话钩子 | —— | ⏸ 按约定不做（范围限定为纯桌宠，不含口型/AI/直播/系统监控） |
+| **M4 打包发布** | electron-builder NSIS/便携版、首次运行向导（选模型目录）、开机自启、Live2D 授权提示 | 干净机器上装完即可用 | ✅ 已完成（§10） |
+
+---
+
+## 10. 打包发布（M4）
+
+`npm run dist` → `release/` 出两个产物：`Live2D-Desktop-Pet-Setup-<ver>.exe`（NSIS，可选安装目录）
+与 `Live2D-Desktop-Pet-portable-<ver>.exe`（便携版，各约 76 MB）。`npm run dist:dir` 只出未压缩目录，便于快速验证。
+
+**打进包里的是什么**（`electron-builder.yml` 的 `files`）：
+
+| 内容 | 原因 |
+|---|---|
+| `dist/**` | 应用本体（main / preload / renderer / 首启向导页） |
+| `vendor/cubism/Core/**` | 渲染必需的 Cubism Core（Live2D 明确列为可再分发的 3 个文件之一） |
+| `vendor/cubism/Framework/Shaders/**` | R5 的外部着色器，运行时由 `fetch` 读取 |
+| `tools/import-model.cjs`、`tools/sendinput.ps1` | 首启向导的导入器；自检的输入注入脚本 |
+
+**不打包**：Framework 源码（仅构建期需要）、`model/`、`userdata/`、`out/`、测试与文档。
+安装包**不含任何模型**——首次启动弹向导让用户选模型目录，原目录只读，导入产物落在用户数据目录。
+
+**打包时踩到的三个坑**（都已在代码里修掉）：
+
+1. **数据目录必须可写**：`__dirname` 在打包后位于只读的 asar 内，
+   所以 `DATA_ROOT = app.isPackaged ? app.getPath('userData') : 仓库根`，
+   模型包、报告、`state.json`、预设都跟着走；开发时仍落在仓库里，便于排查。
+2. **没有模型包时不能让主进程退出**：首次运行还没有 pack，此时应当弹向导。
+   这里暴露了一个真 bug——协议处理器 `allowedRoots()` 无条件读 `activePack.meta`，
+   导致向导页 `firstrun.html` 加载失败（`ERR_UNEXPECTED`）；已改为无包时只暴露应用自身资源。
+3. **用户数据目录名由 `productName` 决定**：只写 `name` 时 `app.getName()` 返回 `desktop-l2d`，
+   用户数据会落在 `%APPDATA%\desktop-l2d`。已补 `productName: Live2D Desktop Pet` 与安装包名称对齐。
+4. 打包时用 `electronDist: node_modules/electron/dist` 复用已解包的 Electron，省掉一次上百 MB 下载。
+
+**验证方式（同一套断言，三种形态都跑过）**：`tools/test-report.cjs` 对自检报告做门禁，实测
+
+| 形态 | 结果 |
+|---|---|
+| 开发态 `npx electron . --selftest`（真实模型，含透明/穿透/拖拽） | 13 通过 / 0 失败 / 0 跳过 |
+| `release/win-unpacked/` 打包目录（把模型包放进用户数据目录后运行） | 12 通过 / 0 失败 / 1 跳过（跳过项是需真实桌面的透明取样） |
+| `Live2D-Desktop-Pet-portable-0.1.0.exe` 便携版 | 12 通过 / 0 失败 / 1 跳过 |
+
+CI 里另有一个**手动触发**的 `package` 作业产出安装包（缺 Core 时直接失败，不产出装起来跑不了的包）。
 
 ---
 

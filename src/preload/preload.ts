@@ -41,3 +41,13 @@ contextBridge.exposeInMainWorld('pet', {
   reportClick: (x: number, y: number): void => ipcRenderer.send('pet:click', { x, y }),
   quit: (): void => ipcRenderer.send('pet:quit'),
 });
+
+// 首次运行向导 / 导入模型
+contextBridge.exposeInMainWorld('wizard', {
+  pickModel: (): Promise<{ canceled?: boolean; ok?: boolean; message?: string }> =>
+    ipcRenderer.invoke('wizard:pick-model'),
+  onProgress: (cb: (p: { stage: string; detail?: string }) => void): void => {
+    ipcRenderer.on('wizard:progress', (_e, p) => cb(p));
+  },
+  quit: (): void => ipcRenderer.send('wizard:quit'),
+});

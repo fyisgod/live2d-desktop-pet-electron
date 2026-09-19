@@ -28,6 +28,8 @@ Electron 透明无边框窗口 + Live2D Cubism 5 SDK for Web 原生运行时（�
 
 ## 快速开始
 
+**从源码跑**（开发/自用）：
+
 ```powershell
 # 0) 依赖（Node 20+；Electron 二进制走镜像直连下载，绕开弱网 ECONNRESET）
 npm install --ignore-scripts
@@ -37,15 +39,19 @@ node tools/fetch-electron.cjs
 node tools/fetch-sdk.cjs
 node tools/vendor-sdk.cjs
 
-# 2) 导入你自己的模型目录（同时做贴图降采样）
-npx electron tools/import-cli.cjs "<你的模型目录>" --tex 2048
+# 2) 导入你自己的模型目录（同时做贴图降采样）；也可以跳过，交给首次运行的向导
+npm run import:model -- "<你的模型目录>" --tex 2048
 
 # 3) 构建并运行
-node tools/build.cjs
-npx electron .
+npm start
 ```
 
-托盘图标 → 退出。右键宠物本体是原生菜单（动作 / 换装开关 / 位置 / 退出）。
+**打成安装包**：`npm run dist` → `release/` 下产出 NSIS 安装包与便携版 exe
+（`npm run dist:dir` 只出未压缩目录，便于快速验证）。安装包内含 Cubism Core 与着色器，
+**不含任何模型**——首次启动会弹向导让你选模型文件夹，原目录只读，导入产物落在用户数据目录。
+
+托盘图标 → 退出。右键宠物本体是原生菜单（动作 / 换装开关 / 位置 / 退出）；
+托盘里还有：导入其他模型、回到待机、帧率上限、互斥分组、缩放、遮挡层、外观预设、开机自启动、打开数据目录。
 
 ## 自检与验证
 

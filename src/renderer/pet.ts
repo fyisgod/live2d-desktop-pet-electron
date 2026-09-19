@@ -449,13 +449,52 @@ window.addEventListener('mouseup', () => {
 window.pet?.onClicked((p) => {
   window.pet?.reportClick(p.x, p.y);
   if (!model || !pack) return;
+  // 分区反应：模型上部（约头肩）→ 换个表情；其余部位 → 随机动作
+  const zone = classifyClickZone(p.x, p.y);
+  const expressions = (pack.switches || []).filter((s) =>
+    /表情|脸|眼睛|嘴/.test(s.group)
+  );
+  if (zone === 'head' && expressions.length) {
+    const pick = expressions[Math.floor(Math.random() * expressions.length)];
+    const a = pack.actions.find((x) => x.id === pick.id);
+    if (a) {
+      log(`摸头 -> ${a.label}`);
+      void toggleExpressionAction(a);
+      return;
+    }
+  }
   const motions = pack.actions.filter((a) => a.kind === 'motion' && a.id !== '__idle');
   if (motions.length) {
     const a = motions[Math.floor(Math.random() * motions.length)];
     model.startMotionById(a.id, PriorityForce);
-    log(`点击互动 -> ${a.label}`);
+    log(`点击互动（${zone ?? '未知区域'}）-> ${a.label}`);
   }
 });
+
+/**
+ * 点击分区：用命中掩码里"实心格"的纵向范围估算头肩位置。
+ * 不做人脸检测——桌宠只需要"摸头"和"戳身体"两种反应，用轮廓上 30% 判定足够稳。
+ */
+function classifyClickZone(clientX: number, clientY: number): 'head' | 'body' | null {
+  if (!hitMask) return null;
+  const { cols, rows, bits } = hitMask;
+  const rect = canvas.getBoundingClientRect();
+  let top = rows;
+  let bottom = -1;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (bits[r * cols + c]) {
+        if (r < top) top = r;
+        if (r > bottom) bottom = r;
+        break;
+      }
+    }
+  }
+  if (bottom < 0) return null;
+  const cy = Math.floor(((clientY - rect.top) / rect.height) * rows);
+  const headLine = top + (bottom - top) * 0.3;
+  return cy <= headLine ? 'head' : 'body';
+}
 
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();

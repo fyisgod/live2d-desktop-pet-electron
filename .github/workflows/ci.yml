@@ -98,3 +98,40 @@ jobs:
             out/m0-report/page-*.png
           if-no-files-found: warn
           retention-days: 14
+
+  # 手动触发（Actions 页面 → Run workflow）：产出 Windows 安装包与便携版。
+  # 不挂在 push 上，避免每次提交都下 NSIS 工具链；缺 Core 时直接失败，
+  # 而不是产出一个装起来跑不了包的安装包。
+  package:
+    name: 打包 Windows 安装包（手动触发）
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --ignore-scripts
+
+      - name: 下载 Electron 二进制
+        run: node tools/fetch-electron.cjs
+
+      - name: 获取官方 Cubism SDK（安装包必须内置 Core）
+        run: |
+          node tools/fetch-sdk.cjs --official
+          node tools/vendor-sdk.cjs
+          node -e "const fs=require('fs');const p='vendor/cubism/Core/live2dcubismcore.min.js';if(!fs.existsSync(p)){console.log('::error title=缺少 Core::安装包必须内置 Cubism Core，请确认 runner 能访问 cubism.live2d.com');process.exit(1)}console.log('Core OK')"
+
+      - name: 打包
+        run: npm run dist
+
+      - name: 上传安装包与便携版
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release/*.exe
+          retention-days: 14

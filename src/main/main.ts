@@ -15,6 +15,8 @@ import {
   desktopCapturer,
   nativeImage,
   net,
+  dialog,
+  shell,
 } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -23,10 +25,16 @@ import { execFile } from 'node:child_process';
 const ROOT = path.resolve(__dirname, '..', '..');
 const DIST_RENDERER = path.join(ROOT, 'dist', 'renderer');
 const VENDOR = path.join(ROOT, 'vendor', 'cubism');
-const PACKS_DIR = path.join(ROOT, 'userdata', 'packs');
-const OUT_DIR = path.join(ROOT, 'out', 'm0-report');
-const STATE_PATH = path.join(ROOT, 'userdata', 'state.json');
-const PRESET_PATH = path.join(ROOT, 'userdata', 'presets.json');
+/**
+ * 可写数据根目录。
+ * 开发时就是仓库根目录（方便对着 out/ 与 userdata/ 排查）；打包后 __dirname 在只读的 asar 里，
+ * 必须改用 app.getPath('userData')，否则导入模型与写设置都会失败。
+ */
+const DATA_ROOT = app.isPackaged ? app.getPath('userData') : ROOT;
+const PACKS_DIR = path.join(DATA_ROOT, 'userdata', 'packs');
+const OUT_DIR = path.join(DATA_ROOT, 'out', 'm0-report');
+const STATE_PATH = path.join(DATA_ROOT, 'userdata', 'state.json');
+const PRESET_PATH = path.join(DATA_ROOT, 'userdata', 'presets.json');
 
 /** M2 可持久化设置 */
 interface Settings {
@@ -35,6 +43,7 @@ interface Settings {
   modelScale: number;
   overlay: string | null;
   pauseWhenHidden: boolean;
+  textureScale: number; // 导入时贴图最长边
 }
 const DEFAULT_SETTINGS: Settings = {
   fpsCap: 60,
@@ -42,6 +51,7 @@ const DEFAULT_SETTINGS: Settings = {
   modelScale: 1,
   overlay: null,
   pauseWhenHidden: true,
+  textureScale: 2048,
 };
 
 function readJsonSafe<T>(p: string, fallback: T): T {
@@ -144,11 +154,9 @@ function listPacks(): { id: string; dir: string; meta: PackMeta }[] {
 
 const packs = listPacks();
 const wantedPack = argValue('pack');
-const activePack = wantedPack ? packs.find((p) => p.id === wantedPack) : packs[0];
-if (!activePack) {
-  console.error(
-    `没有可用的模型包。请先运行: node tools/import-model.cjs "<模型目录>"\n已查找: ${PACKS_DIR}`
-  );
+let activePack = wantedPack ? packs.find((p) => p.id === wantedPack) : packs[0];
+if (!activePack && SELFTEST) {
+  console.error(`没有可用的模型包，无法自检。已查找: ${PACKS_DIR}`);
   app.exit(2);
 }
 
@@ -185,9 +193,12 @@ const MIME: Record<string, string> = {
 
 /** /pack/* 采用「包目录覆盖源模型目录」的叠加视图，这样规范化 model3.json 里的相对路径可直接生效 */
 function allowedRoots(): string[] {
-  const src = activePack!.meta.sourceDir;
+  // 首次运行还没有任何模型包：此时只有应用自身资源可读，
+  // 不能在这里对 activePack 求值（否则向导页会因协议处理器抛错而加载失败）
+  if (!activePack) return [DIST_RENDERER, VENDOR];
+  const src = activePack.meta.sourceDir;
   // 遮挡图片在模型目录或其上一级（本例里 遮挡.png 与模型目录同级）
-  return [DIST_RENDERER, VENDOR, activePack!.dir, src, path.dirname(src)];
+  return [DIST_RENDERER, VENDOR, activePack.dir, src, path.dirname(src)];
 }
 
 function resolvePetPath(pathname: string): string | null {
@@ -198,16 +209,17 @@ function resolvePetPath(pathname: string): string | null {
   else if (rel.startsWith('shaders/'))
     candidates.push(path.join(VENDOR, 'Framework', 'Shaders', 'WebGL', rel.slice(8)));
   else if (rel.startsWith('license/')) candidates.push(path.join(VENDOR, rel.slice(8)));
-  else if (rel.startsWith('pack/')) {
+  else if (activePack && rel.startsWith('pack/')) {
     const sub = rel.slice(5);
-    candidates.push(path.join(activePack!.dir, sub));
-    candidates.push(path.join(activePack!.meta.sourceDir, sub));
-  } else if (rel.startsWith('source/')) candidates.push(path.join(activePack!.meta.sourceDir, rel.slice(7)));
-  else if (rel.startsWith('overlay/')) {
+    candidates.push(path.join(activePack.dir, sub));
+    candidates.push(path.join(activePack.meta.sourceDir, sub));
+  } else if (activePack && rel.startsWith('source/'))
+    candidates.push(path.join(activePack.meta.sourceDir, rel.slice(7)));
+  else if (activePack && rel.startsWith('overlay/')) {
     // 只按文件名在两个已知目录里找，不做任意路径拼接
     const name = path.basename(rel.slice(8));
-    candidates.push(path.join(activePack!.meta.sourceDir, name));
-    candidates.push(path.join(path.dirname(activePack!.meta.sourceDir), name));
+    candidates.push(path.join(activePack.meta.sourceDir, name));
+    candidates.push(path.join(path.dirname(activePack.meta.sourceDir), name));
   } else return null;
 
   const roots = allowedRoots();
@@ -316,6 +328,7 @@ function createPetWindow(): BrowserWindow {
   const h = WIN_H;
   const wa = display.workArea;
   const saved = persisted.positions?.[activePack!.id];
+  const initial = saved ? clampToVisible(saved.x, saved.y) : null;
   const bounds: Electron.Rectangle = SELFTEST
     ? {
         x: Math.round(wa.x + (wa.width - w) / 2),
@@ -324,8 +337,8 @@ function createPetWindow(): BrowserWindow {
         height: h,
       }
     : {
-        x: saved ? saved.x : Math.round(wa.x + wa.width - w - 40),
-        y: saved ? saved.y : Math.round(wa.y + wa.height - h - 40),
+        x: initial ? initial.x : Math.round(wa.x + wa.width - w - 40),
+        y: initial ? initial.y : Math.round(wa.y + wa.height - h - 40),
         width: w,
         height: h,
       };
@@ -485,6 +498,22 @@ function stopDrag(): void {
   if (dragTimer) clearInterval(dragTimer);
   dragTimer = null;
   pointerState = null;
+}
+
+/** 位置夹取：显示器拔掉/分辨率变化后，记忆的坐标可能落在屏幕外，此时回到主屏右下角 */
+function clampToVisible(x: number, y: number): { x: number; y: number } {
+  const visible = screen.getAllDisplays().some((d) => {
+    const wa = d.workArea;
+    return (
+      x + 60 > wa.x && x < wa.x + wa.width - 60 && y + 60 > wa.y && y < wa.y + wa.height - 60
+    );
+  });
+  if (visible) return { x, y };
+  const wa = screen.getPrimaryDisplay().workArea;
+  return {
+    x: Math.round(wa.x + wa.width - WIN_W - 40),
+    y: Math.round(wa.y + wa.height - WIN_H - 40),
+  };
 }
 
 /** 回到主显示器工作区右下角（多显示器时按当前窗口所在屏计算） */
@@ -660,6 +689,26 @@ function rebuildTrayMenu(): void {
     {
       label: '回到待机',
       click: () => petWin?.webContents.executeJavaScript('window.__petResetToIdle()'),
+    },
+    {
+      label: '开机自启动',
+      type: 'checkbox',
+      checked: app.isPackaged ? app.getLoginItemSettings().openAtLogin : false,
+      enabled: app.isPackaged,
+      click: (item) => {
+        if (!app.isPackaged) return;
+        app.setLoginItemSettings({ openAtLogin: item.checked, args: [] });
+        console.log(`[settings] 开机自启动: ${item.checked}`);
+        rebuildTrayMenu();
+      },
+    },
+    {
+      label: '导入其他模型…',
+      click: () => void reimportFromTray(),
+    },
+    {
+      label: '打开数据目录（模型包 / 报告 / 设置）',
+      click: () => void shell.openPath(DATA_ROOT),
     },
     { label: '重置位置', click: () => resetPosition() },
     { label: '退出', click: () => app.quit() },
@@ -1315,6 +1364,128 @@ async function runSelftest(win: BrowserWindow): Promise<void> {
   console.log(`报告: ${reportPath}`);
 }
 
+// ---------------------------------------------------------------- 首次运行向导 / 模型导入
+let wizardWin: BrowserWindow | null = null;
+
+function createWizardWindow(): void {
+  if (wizardWin) {
+    wizardWin.show();
+    wizardWin.focus();
+    return;
+  }
+  wizardWin = new BrowserWindow({
+    width: 580,
+    height: 460,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    title: 'desktop-l2d — 选择模型',
+    backgroundColor: '#12161b',
+    webPreferences: {
+      preload: preloadPath(),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  wizardWin.setMenuBarVisibility(false);
+  wizardWin.loadURL('pet://local/app/firstrun.html');
+  wizardWin.on('closed', () => {
+    wizardWin = null;
+  });
+}
+
+/** 用 Skia(nativeImage) 降采样一张贴图并落盘 */
+function resizeWithNativeImage(src: string, dest: string, maxEdge: number): void {
+  const img = nativeImage.createFromPath(src);
+  if (img.isEmpty()) throw new Error(`无法读取图片: ${src}`);
+  const { width, height } = img.getSize();
+  const k = Math.min(1, maxEdge / Math.max(width, height));
+  const out =
+    k < 1
+      ? img.resize({
+          width: Math.max(1, Math.round(width * k)),
+          height: Math.max(1, Math.round(height * k)),
+          quality: 'best',
+        })
+      : img;
+  fs.writeFileSync(dest, out.toPNG());
+}
+
+/** 导入一个模型目录（主进程内直接调用导入器，打包后同样可用） */
+async function importModelDir(srcDir: string): Promise<{
+  ok: boolean;
+  message: string;
+  packId?: string;
+}> {
+  const progress = (stage: string, detail?: string): void => {
+    wizardWin?.webContents.send('wizard:progress', { stage, detail });
+    console.log(`[import] ${stage}${detail ? ': ' + detail : ''}`);
+  };
+  try {
+    progress('检查导入器');
+    const importerPath = path.join(ROOT, 'tools', 'import-model.cjs');
+    if (!fs.existsSync(importerPath)) throw new Error(`找不到导入器: ${importerPath}`);
+    // 用变量路径 require：让打包器原样保留（不静态内联），打包时把该文件一起带上
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const importer = require(importerPath) as {
+      importModel: (o: {
+        input: string;
+        outRoot: string;
+        textureMaxEdge: number;
+        resizeImpl: (src: string, dest: string, maxEdge: number) => void;
+      }) => { id: string; packDir: string; textures: number };
+    };
+    progress('读取 moc3 与贴图（大贴图降采样较慢，请稍候）');
+    const result = importer.importModel({
+      input: srcDir,
+      outRoot: DATA_ROOT,
+      textureMaxEdge: settings.textureScale || 2048,
+      resizeImpl: resizeWithNativeImage,
+    });
+    progress('完成', result.packDir);
+    return { ok: true, message: `已导入「${result.id}」，贴图 ${result.textures} 张`, packId: result.id };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function pickAndImportModel(): Promise<Record<string, unknown>> {
+  const opts: Electron.OpenDialogOptions = {
+    title: '选择 Live2D 模型文件夹（VTS 导出目录或 Cubism 导出目录）',
+    buttonLabel: '导入',
+    properties: ['openDirectory'],
+  };
+  const res = wizardWin
+    ? await dialog.showOpenDialog(wizardWin, opts)
+    : await dialog.showOpenDialog(opts);
+  if (res.canceled || !res.filePaths.length) return { canceled: true };
+
+  const out = await importModelDir(res.filePaths[0]);
+  if (out.ok) {
+    const fresh = listPacks();
+    activePack = fresh.find((p) => p.id === out.packId) ?? fresh[0];
+    wizardWin?.webContents.send('wizard:done', out);
+    if (wizardWin) {
+      const w = wizardWin;
+      setTimeout(() => {
+        w.close();
+        startPet();
+      }, 900);
+    } else {
+      startPet();
+    }
+  }
+  return out as unknown as Record<string, unknown>;
+}
+
+ipcMain.handle('wizard:pick-model', () => pickAndImportModel());
+ipcMain.on('wizard:quit', () => app.quit());
+
+/** 重新导入一个模型（托盘菜单用，导入完重启宠物窗口以加载新包） */
+async function reimportFromTray(): Promise<void> {
+  createWizardWindow();
+}
+
 // ---------------------------------------------------------------- 启动
 app.whenReady().then(async () => {
   handlePetProtocol();
@@ -1339,11 +1510,27 @@ app.whenReady().then(async () => {
     return;
   }
 
-  createPetWindow();
-  createTray();
-  startCursorPoll();
+  // 没有任何模型包 → 首次运行：先让用户选一个模型目录（打包后的应用无法用命令行导入）
+  if (!activePack) {
+    createWizardWindow();
+    return;
+  }
 
-  if (process.argv.includes('--windowed-help')) console.log('提示：右键托盘图标可退出');
+  startPet();
 });
+
+/** 起宠物窗口、托盘与穿透轮询（导入完成后也会调一次） */
+function startPet(): void {
+  if (!activePack) return;
+  if (!petWin) {
+    createPetWindow();
+    petWin.on('closed', () => {
+      petWin = null;
+    });
+  }
+  if (!tray) createTray();
+  else rebuildTrayMenu();
+  startCursorPoll();
+}
 
 app.on('window-all-closed', () => app.quit());

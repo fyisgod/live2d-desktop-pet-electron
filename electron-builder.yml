@@ -1,0 +1,56 @@
+# electron-builder 打包配置
+#
+# 只带运行时真正需要的东西：
+#  - dist/**                    应用的 main/preload/renderer（含首启向导页）
+#  - vendor/cubism/Core/**      Live2D Cubism Core（渲染必需；Live2D 明确允许再分发的 3 个文件之一）
+#  - vendor/cubism/Framework/Shaders/**  R5 的外部着色器（渲染时由 fetch 读取）
+#  - tools/import-model.cjs     首启向导与「导入其他模型」用的导入器
+# 不带：Framework 源码（仅构建期需要）、model/、userdata/、out/、tests
+#
+# 注意：本仓库不含任何模型，用户需自备并自己导入（授权与合规见 README）。
+appId: com.fyisgod.live2d-desktop-pet
+productName: Live2D Desktop Pet
+copyright: Copyright (c) 2026 feiyasgod — MIT License
+
+directories:
+  output: release
+
+files:
+  - dist/**
+  - tools/import-model.cjs
+  - tools/sendinput.ps1
+  - vendor/cubism/Core/**
+  - vendor/cubism/Framework/Shaders/**
+  - vendor/cubism/LICENSE.md
+  - vendor/cubism/NOTICE.md
+  - vendor/cubism/VERSION.txt
+  - package.json
+  - '!**/*.map'
+  - '!**/*.ts'
+
+asar: true
+compression: normal
+
+# 直接用 node_modules 里已解包的 Electron 分发，避免打包时再下一次上百 MB
+# （tools/fetch-electron.cjs 已经把它准备好；CI 里同理）
+electronDist: node_modules/electron/dist
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  # 未提供 build/icon.ico 时用 Electron 默认图标；放入 256x256 的 icon.ico 即会自动替换
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Live2D 桌宠
+  artifactName: Live2D-Desktop-Pet-Setup-${version}.${ext}
+
+portable:
+  artifactName: Live2D-Desktop-Pet-portable-${version}.${ext}

@@ -58,6 +58,17 @@ async function main() {
     logLevel: 'info',
   });
 
+  // 首次运行向导（静态页面 + 一个独立的小脚本，不进主 bundle）
+  await esbuild.build({
+    entryPoints: [path.join(root, 'src/renderer/firstrun.ts')],
+    outfile: path.join(dist, 'renderer/firstrun.js'),
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome120',
+    logLevel: 'info',
+  });
+
   fs.copyFileSync(
     path.join(root, 'src/renderer/index.html'),
     path.join(dist, 'renderer/index.html')
@@ -65,6 +76,10 @@ async function main() {
   fs.copyFileSync(
     path.join(root, 'src/renderer/probe.html'),
     path.join(dist, 'renderer/probe.html')
+  );
+  fs.copyFileSync(
+    path.join(root, 'src/renderer/firstrun.html'),
+    path.join(dist, 'renderer/firstrun.html')
   );
 
   console.log('build ok ->', path.relative(root, dist));

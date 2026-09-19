@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' pet:; script-src 'self' pet:; style-src 'self' 'unsafe-inline'; img-src 'self' pet: data:"
+    />
+    <title>选择模型</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        padding: 28px 30px;
+        background: #12161b;
+        color: #e6edf3;
+        font: 14px/1.7 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      }
+      h1 { font-size: 18px; margin: 0 0 6px; }
+      p { margin: 0 0 14px; color: #9aa7b4; }
+      ol { margin: 0 0 18px; padding-left: 20px; color: #9aa7b4; }
+      li { margin-bottom: 4px; }
+      code { color: #7ee0c0; }
+      button {
+        font: inherit;
+        padding: 9px 18px;
+        border-radius: 8px;
+        border: 1px solid #2f81f7;
+        background: #1f6feb;
+        color: #fff;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.55; cursor: default; }
+      #quit { border-color: #30363d; background: transparent; color: #9aa7b4; margin-left: 8px; }
+      #status { margin-top: 16px; min-height: 44px; color: #d29922; white-space: pre-wrap; }
+      #status.ok { color: #3fb950; }
+      #status.err { color: #f85149; }
+      .hint { margin-top: 18px; font-size: 12px; color: #6e7681; }
+    </style>
+  </head>
+  <body>
+    <h1>先选一个 Live2D 模型文件夹</h1>
+    <p>桌宠需要你自备模型（本工具不分发任何模型）。支持两种目录：</p>
+    <ol>
+      <li>VTube Studio 导出的模型文件夹（含 <code>*.vtube.json</code>、<code>*.model3.json</code>）</li>
+      <li>Cubism Editor 导出的模型目录（含 <code>*.model3.json</code> 与 <code>*.moc3</code>）</li>
+    </ol>
+    <button id="pick">选择模型文件夹并导入</button>
+    <button id="quit">退出</button>
+    <div id="status"></div>
+    <div class="hint">导入会：读取 moc3、把贴图降采样到 2048 并缓存、把表情/动作/换装开关归类。原目录只读，不会被修改。</div>
+    <script src="pet://local/app/firstrun.js"></script>
+  </body>
+</html>

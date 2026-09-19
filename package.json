@@ -1,9 +1,11 @@
 {
   "name": "desktop-l2d",
+  "productName": "Live2D Desktop Pet",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
   "description": "把 Live2D (VTube Studio 导出) 模型变成桌面宠物的工具",
+  "author": "feiyasoul",
   "main": "dist/main/main.cjs",
   "scripts": {
     "fetch-sdk": "node tools/fetch-sdk.cjs",
@@ -16,6 +18,8 @@
     "test:report": "node tools/test-report.cjs",
     "test": "node tools/test-typecheck.cjs && node tools/test-importer.cjs",
     "smoke": "node tools/ci-smoke.cjs",
+    "dist": "node tools/build.cjs && electron-builder --win --publish never",
+    "dist:dir": "node tools/build.cjs && electron-builder --win --dir --publish never",
     "selftest": "node tools/build.cjs && electron . --selftest",
     "start": "node tools/build.cjs && electron ."
   },
@@ -24,6 +28,7 @@
   },
   "devDependencies": {
     "electron": "^33.2.0",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.24.0",
     "typescript": "^5.7.2"
   }

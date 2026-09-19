@@ -65,13 +65,18 @@ function main() {
   }
   const texIdx = process.argv.indexOf('--tex');
   const texEdge = texIdx >= 0 ? Number(process.argv[texIdx + 1]) : 0;
-  const result = importModel({
-    input: inputArg,
-    textureMaxEdge: texEdge,
-    // 纯 Node 下没有图片处理能力：不给 resizeImpl，则贴图降采样交给运行时兜底
-    resizeImpl: null,
-  });
-  console.log(JSON.stringify(result, null, 2));
+  try {
+    const result = importModel({
+      input: inputArg,
+      textureMaxEdge: texEdge,
+      // 纯 Node 下没有图片处理能力：不给 resizeImpl，则贴图降采样交给运行时兜底
+      resizeImpl: null,
+    });
+    console.log(JSON.stringify(result, null, 2));
+  } catch (e) {
+    console.error(`导入失败: ${e.message}`);
+    process.exit(1);
+  }
   if (!texEdge) {
     console.log('提示：未传 --tex，贴图将在运行时降采样（可用 npm run import:model 走 Electron 版本落盘缓存）');
   }
@@ -82,23 +87,23 @@ function main() {
  *   input: string,
  *   textureMaxEdge?: number,
  *   resizeImpl?: null | ((src: string, dest: string, maxEdge: number) => void),
+ *   outRoot?: string,   // 产物根目录（打包后由主进程传 app.getPath('userData')）
  * }} opts
  */
 function importModel(opts) {
   const inputArg = opts.input;
   const textureMaxEdge = opts.textureMaxEdge || 0;
   const resizeImpl = opts.resizeImpl || null;
-  const srcDir = path.resolve(root, inputArg);
+  const outRoot = opts.outRoot ? path.resolve(opts.outRoot) : root;
+  const srcDir = path.isAbsolute(inputArg) ? inputArg : path.resolve(root, inputArg);
   if (!fs.existsSync(srcDir)) {
-    console.error(`目录不存在: ${srcDir}`);
-    process.exit(1);
+    throw new Error(`目录不存在: ${srcDir}`);
   }
 
   // 1) 定位 model3.json
   const model3Files = walk(srcDir, (p) => p.toLowerCase().endsWith('.model3.json'));
   if (model3Files.length === 0) {
-    console.error('未找到 *.model3.json —— 这不是 Cubism/VTS 模型目录');
-    process.exit(1);
+    throw new Error('未找到 *.model3.json —— 这不是 Cubism/VTS 模型目录');
   }
   const model3Path = model3Files[0];
   const model3 = readJson(model3Path);
@@ -274,7 +279,7 @@ function importModel(opts) {
 
   // 11) 输出 pack
   const id = path.basename(srcDir);
-  const outDir = path.join(root, 'userdata', 'packs', id);
+  const outDir = path.join(outRoot, 'userdata', 'packs', id);
   fs.mkdirSync(outDir, { recursive: true });
 
   // 11a) 贴图降采样：交给调用方提供的 resizeImpl（Electron 版用 Skia/nativeImage，
