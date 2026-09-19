@@ -19,11 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-注意：本许可证只覆盖本仓库自身的代码。
-
-- Live2D Cubism SDK（Core 与 Framework）由 Live2D Inc. 以独立许可发布，**不包含在本仓库中**，
-  由 `tools/fetch-sdk.cjs` 从官方渠道获取，其使用受 Live2D 的许可条款约束。
-- 使用者自备的 Live2D 模型（`model/`）及其衍生数据不在本许可证范围内。
