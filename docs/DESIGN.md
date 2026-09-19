@@ -347,6 +347,10 @@ npm run selftest                                        # 默认 2048；可加 -
 | 13 | "基准值"被污染成上一帧的物理/视线/眨眼 | 在**帧外**读模型"当前值"时，里面还留着上一帧调度器的输出（物理/呼吸/视线/眨眼按设计每帧重算、从不保存） | 取基准必须先 `loadParameters()` 回到**保存态**再采样 |
 | 14 | 换装开关"关不掉" / Add 混合逐帧累积 | 覆盖层写在 `saveParameters()` **之前** → 值被持久化；且 Add 每次基于已加过的值再算 | 覆盖层放在保存之后、与表情同一阶段（瞬态层），每帧从原始值重算；`Overwrite/Add/Multiply` 三种混合都要支持 |
 | 15 | 连点动作只切一次 | `reserveMotion(priority)` 对**同优先级**已在播的动作返回 false；且 `stopAllMotions()` 不会自己清 `_currentPriority`，不清就会把待机动作永久拒掉（模型僵在最后一帧） | 强制切换：`stopAllMotions()` + 复位 `_currentPriority/_reservePriority` 后再起新动作 |
+| 16 | 动作"永不结束" | 普通 Cubism 模型的动作 `Meta.Loop` 普遍为 true（Live2D 官方 8 个样例的动作全是 Loop=true，VTS 的动作也是），照搬会让桌宠永久卡在动作里，也没有"动作结束"可判定 | 被触发的动作一律一次性播放（`setLoop(false)`），只有待机动画循环；非 VTS 模型按文件名兜底识别待机动作 |
+| 17 | CI 里拿不到官方 SDK | GitHub 云机房出口访问不到 `cubism.live2d.com`；而 **Core 只在官方 zip 里**（`CubismWebSamples` 的 `Core/` 目录只有说明文件，jsDelivr 取 `.d.ts` 直接 404），不能拿非官方镜像顶替 | 双来源链路：官方 zip（唯一带 Core）→ GitHub 官方仓库的 Framework 归档；静态检查作业只用后者，冒烟作业拿不到 Core 时输出 `::warning::` 如实跳过。另：`fetch-sdk.cjs` 原来下载失败**不返回非零退出码**，错误被推迟到 vendor 阶段才暴露，已修 |
+| 18 | CI 日志读不到（无凭据），失败原因看不见 | GitHub Actions 的日志与 artifact 下载都需要认证 | 把失败诊断打成 **check-run annotations**（`::error title=...::`），可匿名从 API 读到；`tools/test-report.cjs` 的每条失败断言都会带注解 |
+| 19 | 性能类断言在 CI 上误报 | runner 无 GPU 走 SwiftShader，单帧渲染慢于 33ms，30fps 上限实测只有 21.9fps | 断言只判"上限是否真的起作用"（不超过上限、明显低于不限帧、60fps 档高于 30fps 档），不要求达到目标帧率 |
 
 
 ## 附：与"现成方案"的取舍

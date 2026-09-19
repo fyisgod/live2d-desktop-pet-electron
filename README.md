@@ -73,6 +73,32 @@ docs/DESIGN.md   设计与实测记录（含 SDK 陷阱与授权说明）
 vendor/         第三方依赖的落点（不随仓库分发，见 vendor/README.md）
 ```
 
+## 测试与 CI
+
+本地可跑的门禁与用例：
+
+```powershell
+npm test              # 类型门禁（src/ 必须 0 错误）+ 导入器单元测试（合成夹具）
+npm run smoke         # 端到端：导入 SDK 自带示例模型 → 起桌宠自检 → 断言报告
+npm run test:report   # 只对最近一次自检报告做断言（--require-transparency 可要求必须验证透明合成）
+npm run selftest      # 完整自检（含透明合成与 OS 级输入注入，需要真实桌面）
+```
+
+CI（`.github/workflows/ci.yml`）两个作业：
+
+| 作业 | 平台 | 内容 |
+|---|---|---|
+| `verify` | ubuntu | 取官方 GitHub 仓库的 Cubism Framework → 类型门禁 → 构建 → 导入器测试 → 校验没有把模型/SDK/产物提交进仓库 |
+| `smoke` | windows | 下载 Electron 与官方 SDK → 用 SDK 自带的官方示例模型（Haru）走完整链路：导入 → 起桌宠 → 自检 → 断言报告，报告与页面截图作为 artifact 上传 |
+
+两点环境事实（都已在 CI 里处理，不是"应该没问题"）：
+
+- **Core 只存在于官方 zip**：`live2dcubismcore.min.js` 在 GitHub 上没有（`CubismWebSamples` 的 `Core/` 目录只有说明文件），
+  所以不上非官方镜像顶替。若某个网络环境访问不到 `cubism.live2d.com`，`smoke` 会输出可见警告并如实跳过，
+  不会把静态检查的绿灯伪装成端到端通过；`verify` 不受影响，因为它只需要 Framework。
+- **无 GPU 的 runner** 会走 SwiftShader 软件渲染：透明合成与 OS 级输入注入依赖真实桌面，在 CI 中跳过
+  （`--no-transparency-test` / `--no-input-test`），其余用例真实执行。
+
 ## 授权与合规（重要）
 
 - **本项目代码采用 [MIT 许可证](LICENSE)**，但它**只覆盖本仓库自身的代码**：
