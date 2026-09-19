@@ -81,6 +81,8 @@ function argValue(name: string, fallback: string | null = null): string | null {
 const SELFTEST = process.argv.includes('--selftest');
 const TEXTURE_SCALE = Number(argValue('scale', '2048'));
 const RUN_SECONDS = Number(argValue('seconds', '6'));
+/** CI / 无桌面环境：跳过依赖真实桌面的整屏取样 */
+const SKIP_TRANSPARENCY = process.argv.includes('--no-transparency-test');
 const SKIP_INPUT_TEST = process.argv.includes('--no-input-test');
 const SELFTEST_M2 = !process.argv.includes('--no-m2-test');
 /** --raw：用原图版本 model3.json（对照测量 8K 贴图的开销） */
@@ -109,13 +111,22 @@ interface PackMeta {
   textureVramRawBytes: number;
   lipSyncParamIds: string[];
   actions: { id: string; label: string; kind: string; file: string; triggers: string[] }[];
-  switches: unknown[];
+  switches: PackSwitch[];
   idle: { file: string; lost: string | null } | null;
   icon: string | null;
   vtsVersion: string | null;
   motionCount: number;
   expressionCount: number;
   partCount: number;
+}
+
+/** 导入器识别出的"开关型"表情（换装/贴纸/物品） */
+interface PackSwitch {
+  id: string;
+  label: string;
+  file: string;
+  parameterId: string | null;
+  group: string;
 }
 
 function listPacks(): { id: string; dir: string; meta: PackMeta }[] {
@@ -591,7 +602,7 @@ function rebuildTrayMenu(): void {
     {
       label: `互斥分组：${settings.exclusiveGroups.length ? settings.exclusiveGroups.join('/') : '无'}`,
       submenu: (() => {
-        const meta = activePack!.meta as PackMeta & { switches: { id: string; group: string }[] };
+        const meta = activePack!.meta;
         const counts = new Map<string, number>();
         for (const s of meta.switches || []) {
           counts.set(s.group, (counts.get(s.group) || 0) + 1);
@@ -646,6 +657,10 @@ function rebuildTrayMenu(): void {
     { type: 'separator' },
     { label: `外观预设（${Object.keys(currentPackPresets()).length}）`, submenu: presetItems },
     { type: 'separator' },
+    {
+      label: '回到待机',
+      click: () => petWin?.webContents.executeJavaScript('window.__petResetToIdle()'),
+    },
     { label: '重置位置', click: () => resetPosition() },
     { label: '退出', click: () => app.quit() },
   ]);
@@ -738,9 +753,7 @@ ipcMain.on('pet:quit', () => app.quit());
 /** 右键菜单：按导入器识别出的参数组分组，比 50 条平铺好用 */
 ipcMain.on('pet:open-menu', () => {
   if (!petWin) return;
-  const meta = activePack!.meta as PackMeta & {
-    switches: { id: string; label: string; group: string }[];
-  };
+  const meta = activePack!.meta;
   const send = (kind: string, id: string) => petWin?.webContents.send('pet:action', { kind, id });
 
   const switchIds = new Set((meta.switches || []).map((s) => s.id));
@@ -1030,38 +1043,56 @@ async function runInputTests(win: BrowserWindow): Promise<Record<string, unknown
 }
 
 // ---------------------------------------------------------------- M2 回归测试
-/** 连续切换这些动作，验证切换后不会留下上一个动作的素材（id 取自 pack.actions[].id = 文件名去后缀） */
-const MOTION_CHAIN = ['手2拿手柄', '手4打招呼', '手5比心'];
+/**
+ * 连续切换这些动作，验证切换后不会留下上一个动作的素材。
+ * 动作列表从当前 pack 里取（排除待机/丢失捕捉），这样换任何模型都能跑同一套用例。
+ */
+function pickMotionChain(limit = 3): string[] {
+  const meta = activePack!.meta;
+  const idleFiles = new Set(
+    [meta.idle?.file, meta.idle?.lost].filter(Boolean).map((f) => String(f))
+  );
+  return meta.actions
+    .filter((a) => a.kind === 'motion' && !idleFiles.has(a.file))
+    .map((a) => a.id)
+    .slice(0, limit);
+}
 
 async function runM2Tests(win: BrowserWindow): Promise<Record<string, unknown>> {
-  const out: Record<string, unknown> = { motionChain: MOTION_CHAIN };
+  const motionChain = pickMotionChain(3);
+  const out: Record<string, unknown> = { motionChain };
   if (!SELFTEST_M2) {
     out.skipped = true;
     return out;
   }
   const js = (expr: string): Promise<unknown> => win.webContents.executeJavaScript(expr);
+  if (!motionChain.length) out.motionChainNote = '当前模型没有可测的动作';
 
   // 1) 单个动作播完后参数是否复位
-  try {
-    out.motionResidue = await js(
-      `window.__petMotionResidueTest(${JSON.stringify(MOTION_CHAIN[0])})`
-    );
-  } catch (e) {
-    out.motionResidue = { error: String(e) };
+  if (motionChain.length) {
+    try {
+      out.motionResidue = await js(
+        `window.__petMotionResidueTest(${JSON.stringify(motionChain[0])})`
+      );
+    } catch (e) {
+      out.motionResidue = { error: String(e) };
+    }
   }
 
   // 2) 用户报的场景：不等播完就连切多个动作
-  try {
-    out.motionChainResidue = await js(
-      `window.__petMotionChainTest(${JSON.stringify(MOTION_CHAIN)})`
-    );
-  } catch (e) {
-    out.motionChainResidue = { error: String(e) };
+  if (motionChain.length >= 2) {
+    try {
+      out.motionChainResidue = await js(
+        `window.__petMotionChainTest(${JSON.stringify(motionChain)})`
+      );
+    } catch (e) {
+      out.motionChainResidue = { error: String(e) };
+    }
   }
 
   // 3) 换装开关：打开多个同组开关应互斥；全部关闭后参数应复位
   try {
-    const switchIds = (activePack!.meta as PackMeta & { switches: { id: string; group: string }[] }).switches
+    const switchIds = activePack!.meta.switches
       .filter((s) => s.group === '服装')
       .slice(0, 3)
       .map((s) => s.id);
@@ -1200,13 +1231,16 @@ async function runSelftest(win: BrowserWindow): Promise<void> {
   const metrics = await waitForMetrics(180_000);
 
   const b = win.getBounds();
-  const samples = await sampleScreen(win, [
-    { name: 'outsideLeftBackdrop', x: b.x - 20, y: b.y + Math.round(b.height / 2) }, // 对照点：窗口外，必须是品红
-    { name: 'insideTopRight', x: b.x + b.width - 10, y: b.y + 10 }, // 窗口内右上角：应透明 → 品红
-    { name: 'insideBottomLeft', x: b.x + 10, y: b.y + b.height - 10 },
-    { name: 'insideBottomRight', x: b.x + b.width - 10, y: b.y + b.height - 10 },
-    { name: 'center', x: b.x + Math.round(b.width / 2), y: b.y + Math.round(b.height / 2) }, // 模型所在：不应是品红
-  ]);
+  // CI / 无桌面环境用 --no-transparency-test 跳过整屏取样（依赖真实桌面的合成结果）
+  const samples: Record<string, any> = SKIP_TRANSPARENCY
+    ? { skipped: true, reason: '本次以 --no-transparency-test 运行，未做整屏取样' }
+    : await sampleScreen(win, [
+        { name: 'outsideLeftBackdrop', x: b.x - 20, y: b.y + Math.round(b.height / 2) }, // 对照点：窗口外，必须是品红
+        { name: 'insideTopRight', x: b.x + b.width - 10, y: b.y + 10 }, // 窗口内右上角：应透明 → 品红
+        { name: 'insideBottomLeft', x: b.x + 10, y: b.y + b.height - 10 },
+        { name: 'insideBottomRight', x: b.x + b.width - 10, y: b.y + b.height - 10 },
+        { name: 'center', x: b.x + Math.round(b.width / 2), y: b.y + Math.round(b.height / 2) }, // 模型所在：不应是品红
+      ]);
 
   const pagePng = await win.capturePage();
   const shotPath = path.join(OUT_DIR, `page-scale${TEXTURE_SCALE}.png`);
@@ -1252,10 +1286,15 @@ async function runSelftest(win: BrowserWindow): Promise<void> {
     transparency: {
       method:
         'pet 窗口下方铺纯品红(#FF00FF)不透明窗口，整屏截屏取样：窗口内空白处应为品红，模型处不应为品红',
+      skipped: SKIP_TRANSPARENCY,
       backdropControlVisible: controls,
       transparentAreasShowBackdrop: cornersTransparent,
       modelPixelsOpaque: modelVisible,
-      verdict: controls && cornersTransparent && modelVisible ? 'PASS' : 'FAIL',
+      verdict: SKIP_TRANSPARENCY
+        ? 'SKIPPED'
+        : controls && cornersTransparent && modelVisible
+          ? 'PASS'
+          : 'FAIL',
       samples,
     },
     pageScreenshot: path.relative(ROOT, shotPath),

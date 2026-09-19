@@ -10,7 +10,8 @@
  *       两者原文都在 vendor/cubism/ 与 pet://local/license/。
  */
 import { CubismFramework, LogLevel, Option } from '@framework/live2dcubismframework';
-import { CubismModelSettingJson, ICubismModelSetting } from '@framework/cubismmodelsettingjson';
+import { CubismModelSettingJson } from '@framework/cubismmodelsettingjson';
+import { ICubismModelSetting } from '@framework/icubismmodelsetting';
 import { CubismDefaultParameterId } from '@framework/cubismdefaultparameterid';
 import { CubismUserModel } from '@framework/model/cubismusermodel';
 import { CubismModel } from '@framework/model/cubismmodel';
@@ -166,6 +167,8 @@ export class PetModel extends CubismUserModel {
   private _mvp = new CubismMatrix44();
   private _userTimeSeconds = 0;
   private _motionUpdated = false;
+  /** 当前 model3.json 的解析结果（基类 CubismUserModel 并没有 _modelSetting 字段，自己持有） */
+  private _settingRef: ICubismModelSetting | null = null;
   private _textures: LoadedTexture[] = [];
   private _expressions = new Map<string, ACubismMotion>();
   private _motions = new Map<string, CubismMotion>();
@@ -267,8 +270,10 @@ export class PetModel extends CubismUserModel {
 
     // 1) 规范化 model3.json
     const settingUrl = this._packBaseUrl + encodeURI(opts.model3File || opts.pack.model3.normalized);
-    const setting = new CubismModelSettingJson(await fetchBuf(settingUrl));
-    this._modelSetting = setting;
+    const settingBuf = await fetchBuf(settingUrl);
+    // 注意：CubismModelSettingJson 的第二个参数 size 是必需的，少传会让解析依赖默认值
+    const setting = new CubismModelSettingJson(settingBuf, settingBuf.byteLength);
+    this._settingRef = setting;
 
     // 2) moc3
     const mocName = setting.getModelFileName();
@@ -325,7 +330,10 @@ export class PetModel extends CubismUserModel {
             motion.setEffectIds(eyeBlinkIds, lipSyncIds);
             motion.setFadeInTime(a.stopOnLastFrame ? 0.3 : 0.5);
             motion.setFadeOutTime(0.3);
-            if (a.stopOnLastFrame) motion.setLoop(false);
+            // 桌面宠物语义：被触发的动作一次性播完就回待机，只有待机动作才循环。
+            // 不能照搬 motion3.json 的 Meta.Loop —— 普通 Cubism 模型（含 Live2D 官方样例，
+            // 27 个动作全是 Loop=true）会因此让宠物永久卡在动作里、也没有"动作结束"可言。
+            motion.setLoop(false);
             this._motions.set(a.id, motion);
             // 记录这条动作驱动哪些参数 —— 动作结束时要把它们淡回基准值
             const ids = extractCurveIds(buf);
@@ -480,14 +488,11 @@ export class PetModel extends CubismUserModel {
       visibleDrawables: this.countVisibleDrawables(),
       maskBuffers: (() => {
         try {
-          const mgr = renderer.getClippingManager();
-          return mgr ? mgr.getClippingMaskCount() : 0;
+          // CubismRenderer_WebGL 上的公开接口是 getRenderTextureCount()，
+          // getClippingManager() 属于内部 profile 类，不能直接当成 renderer 的方法用。
+          return renderer.getRenderTextureCount();
         } catch {
-          try {
-            return renderer.getRenderTextureCount();
-          } catch {
-            return 0;
-          }
+          return 0;
         }
       })(),
       expressions: this._expressions.size,
@@ -613,7 +618,7 @@ export class PetModel extends CubismUserModel {
     const renderer = this.getRenderer();
     if (renderer) renderer.setRenderTargetSize(width, height);
     // 长宽比变了要重算取景：模型矩阵也一起重建
-    if (this._modelSetting) this.applyFraming(this._modelSetting);
+    if (this._settingRef) this.applyFraming(this._settingRef);
   }
 
   // ------------------------------------------------------------------ 每帧
@@ -651,6 +656,11 @@ export class PetModel extends CubismUserModel {
     this._updateScheduler.onLateUpdate(model, deltaTimeSeconds);
     model.update();
     this._stats.updateMs = performance.now() - t0;
+  }
+
+  /** 当前是否在播"手势/动作"（待机不算）；供自检与行为引擎判断"动作是否已回到待机" */
+  public get gesturePlaying(): boolean {
+    return this.isGesturePlaying();
   }
 
   /** 当前是否在播"手势/动作"（待机不算） */
@@ -817,6 +827,18 @@ export class PetModel extends CubismUserModel {
     return true;
   }
 
+  /** 立刻回到待机：停掉当前动作、取消待回退、重新起待机动画 */
+  public resetToIdle(): void {
+    this._motionManager.stopAllMotions();
+    this._motionManager.updateMotion(this.getModel(), 0);
+    // stopAllMotions 不会自己把优先级归零，不清会把后续动作/待机永久拒掉
+    this._motionManager._currentPriority = PriorityNone;
+    this._motionManager.setReservePriority(PriorityNone);
+    this._restore = null;
+    this._activeMotionId = null;
+    this.startIdle();
+  }
+
   public startRandomMotion(ids: string[], priority = PriorityNormal): boolean {
     if (ids.length === 0) return false;
     const id = ids[Math.floor(Math.random() * ids.length)];
@@ -890,7 +912,7 @@ export class PetModel extends CubismUserModel {
   /** 模型缩放倍数（相对"自动铺满窗口"的基准） */
   public setModelScale(k: number): void {
     this._scaleMultiplier = Math.max(0.2, Math.min(3, k));
-    if (this._modelSetting) this.applyFraming(this._modelSetting);
+    if (this._settingRef) this.applyFraming(this._settingRef);
   }
 
   public get modelScale(): number {

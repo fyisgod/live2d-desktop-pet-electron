@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: 类型门禁 / 构建 / 导入器测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # Electron 的 postinstall 会下载上百 MB 二进制，本作业不需要，统一跳过
+      - name: 安装依赖
+        run: npm ci --ignore-scripts
+
+      - name: 获取官方 Cubism SDK 并 vendor（不随仓库分发）
+        run: |
+          node tools/fetch-sdk.cjs
+          node tools/vendor-sdk.cjs
+
+      - name: 类型门禁（src/ 必须零错误）
+        run: npm run typecheck
+
+      - name: 构建
+        run: npm run build
+
+      - name: 导入器测试（合成夹具，不依赖任何模型资源）
+        run: npm run test:importer
+
+      - name: 确认没有把模型 / SDK / 构建产物提交进仓库
+        run: |
+          bad=$(git ls-files | grep -E '^(model/|userdata/|out/|dist/|\.cache/|node_modules/|vendor/cubism/)' || true)
+          if [ -n "$bad" ]; then
+            echo "以下路径不应被跟踪："; echo "$bad"; exit 1
+          fi
+          echo "OK：未跟踪模型 / SDK / 构建产物"
+
+  smoke:
+    name: 真实模型端到端冒烟（Windows）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --ignore-scripts
+
+      - name: 下载 Electron 二进制
+        run: node tools/fetch-electron.cjs
+
+      - name: 获取官方 Cubism SDK 并 vendor
+        run: |
+          node tools/fetch-sdk.cjs
+          node tools/vendor-sdk.cjs
+
+      - name: 构建
+        run: node tools/build.cjs
+
+      # 用 SDK 自带的官方示例模型（Haru）走完整链路：导入 → 起桌宠 → 自检 → 断言报告。
+      # 透明合成与 OS 级输入注入依赖真实桌面，因此在 runner 上跳过，其余用例（模型加载、
+      # 画布 alpha 覆盖、动作残留、换装开关、外观预设、帧率上限、设置持久化）都会真实执行。
+      - name: 导入示例模型并跑端到端冒烟
+        run: node tools/ci-smoke.cjs --model Haru --seconds 5
+
+      - name: 上传自检报告与页面截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-report
+          path: |
+            out/m0-report/report-*.json
+            out/m0-report/page-*.png
+          if-no-files-found: warn
+          retention-days: 14

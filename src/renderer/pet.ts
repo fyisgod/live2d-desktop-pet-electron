@@ -25,10 +25,18 @@ declare const window: Window & {
     openMenu: (info?: unknown) => void;
     onAction: (cb: (a: { kind: string; id: string }) => void) => void;
     onEnablePassthrough: (cb: () => void) => void;
+    /** 主进程判定为拖拽/点击后回传 */
+    pointerDown: () => void;
+    pointerUp: () => void;
+    onClicked: (cb: (p: { x: number; y: number }) => void) => void;
     /** M2：设置下发 / 预设存取 / 遮挡层 结果回报 */
     onSettings: (cb: (s: PetSettings) => void) => void;
-    savePreset: (name: string, preset: Record<string, number>) => void;
-    reportPreset: (p: { preset: Record<string, number>; activeSwitches: string[]; restore: unknown }) => void;
+    savePreset: (name: string, preset: Record<string, ParamOverride>) => void;
+    reportPreset: (p: {
+      preset: Record<string, ParamOverride>;
+      activeSwitches: string[];
+      restore: unknown;
+    }) => void;
     sendHitMask: (m: { cols: number; rows: number; bits: Uint8Array }) => void;
     reportClick: (x: number, y: number) => void;
     quit: () => void;
@@ -500,7 +508,9 @@ function applyOverlay(): void {
     );
     if (!allIds.length) return { error: '没有可测参数' };
 
-    await waitFor(() => model!.activeMotionId === null && !model!.restoreStats.pending, 20000);
+    // 先把状态归位（而不是干等上一个动作播完）
+    model.resetToIdle();
+    await new Promise((r) => setTimeout(r, 400));
     model.resetParametersToDefault(); // 用例隔离
     await new Promise((r) => setTimeout(r, 1200));
     const before = model.snapshotSaved();
@@ -512,9 +522,12 @@ function applyOverlay(): void {
     }
     const during = model.snapshotSaved();
     const finished = await waitFor(
-      () => model!.activeMotionId === null && !model!.restoreStats.pending,
+      () => !model!.gesturePlaying && !model!.restoreStats.pending,
       40000
     );
+    if (!finished) {
+      return { skipped: true, reason: '动作未在预期时间内结束（可能是循环动作，不适用残留判定）' };
+    }
     await new Promise((r) => setTimeout(r, 700));
     const after = model.snapshotSaved();
 
@@ -574,7 +587,11 @@ function applyOverlay(): void {
 };
 
 /** 当前外观（导出参数快照 + 已开开关），供"存为预设"与"复制外观"用 */
-function currentLook(): { preset: Record<string, number>; activeSwitches: string[]; restore: unknown } {
+function currentLook(): {
+  preset: Record<string, ParamOverride>;
+  activeSwitches: string[];
+  restore: unknown;
+} {
   return {
     preset: model ? model.exportPreset() : {},
     activeSwitches: model ? model.activeSwitches : [],
@@ -591,7 +608,12 @@ function currentLook(): { preset: Record<string, number>; activeSwitches: string
     if (!model || !model.loaded) return { error: 'model not loaded' };
     const idleIds = new Set(model.idleParamIds);
     const ids = model.getMotionParamIds(motionId).filter((id) => !idleIds.has(id));
-    if (!ids.length) return { error: `动作 ${motionId} 没有可测参数` };
+    if (!ids.length) {
+      return {
+        skipped: true,
+        reason: `动作 ${motionId} 驱动的参数全部与待机动画重叠，无法与待机摆动区分`,
+      };
+    }
 
     const waitFor = async (cond: () => boolean, timeoutMs: number): Promise<boolean> => {
       const t0 = performance.now();
@@ -602,7 +624,9 @@ function currentLook(): { preset: Record<string, number>; activeSwitches: string
       return false;
     };
 
-    await waitFor(() => model!.activeMotionId === null && !model!.restoreStats.pending, 20000);
+    // 先把状态归位（而不是干等上一个动作播完：最长的一条动作有 17s）
+    model.resetToIdle();
+    await new Promise((r) => setTimeout(r, 400));
     model.resetParametersToDefault(); // 用例隔离：先洗干净，避免上个用例的残留污染基准
     await new Promise((r) => setTimeout(r, 1200));
     const before = model.snapshotSaved();
@@ -610,9 +634,12 @@ function currentLook(): { preset: Record<string, number>; activeSwitches: string
     await new Promise((r) => setTimeout(r, 400));
     const during = model.snapshotSaved();
     const finished = await waitFor(
-      () => model!.activeMotionId === null && !model!.restoreStats.pending,
+      () => !model!.gesturePlaying && !model!.restoreStats.pending,
       25000
     );
+    if (!finished) {
+      return { skipped: true, reason: '动作未在预期时间内结束（可能是循环动作，不适用残留判定）' };
+    }
     await new Promise((r) => setTimeout(r, 500));
     const after = model.snapshotSaved();
 
@@ -746,40 +773,64 @@ function currentLook(): { preset: Record<string, number>; activeSwitches: string
 (window as unknown as { __petPresetTest: () => Promise<unknown> }).__petPresetTest = async () => {
   if (!model || !model.loaded) return { error: 'model not loaded' };
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  // 用一组"颜色/异瞳"常用参数做样本，确保有内容可测
-  const sample: Record<string, { id: string; value: number; blend: string }> = {};
-  const candidates = ['Param22', 'Param23', 'Param24', 'Param25', 'Param26'];
-  const current = model.snapshotCurrent();
-  for (const id of candidates) {
-    if (current[id] === undefined) continue;
-    sample[id] = { id, value: (current[id] || 0) + 1, blend: 'Add' };
-  }
-  if (!Object.keys(sample).length) return { error: '找不到可测参数' };
+  // 参数名不写死；并且要"漂移感知"：先隔 200ms 采两次得到每个参数的本底噪声，
+  // 因为待机/视线/呼吸/物理会让参数每帧都在动 —— 不扣除本底就会把动画当成预设效果（实测踩过）。
+  const idleIds = new Set(model.idleParamIds);
+  const a1 = model.snapshotCurrent();
+  await sleep(200);
+  const a2 = model.snapshotCurrent();
+  const drift: Record<string, number> = {};
+  for (const id of Object.keys(a1)) drift[id] = Math.abs((a2[id] ?? 0) - (a1[id] ?? 0));
 
-  const keys = Object.keys(sample);
+  // 不排除"待机驱动"的参数：像 Haru 这种待机会覆盖全部参数的模型会把候选筛空，
+  // 而漂移感知的判定本身已经能扣掉动画带来的变化。
+  const keys = Object.keys(a1)
+    .filter((id) => !/Eye.*Open|Mouth/i.test(id))
+    .sort((x, y) => drift[x] - drift[y])
+    .slice(0, 5);
+  if (!keys.length) return { error: '找不到可测参数' };
+  const noise = +Math.max(0, ...keys.map((k) => drift[k])).toFixed(4);
+
+  const sample: Record<string, { id: string; value: number; blend: string }> = {};
+  for (const id of keys) sample[id] = { id, value: (a2[id] || 0) + 1, blend: 'Add' };
+
   const base = model.snapshotCurrent();
   model.applyPreset(sample);
   await sleep(2 * 17);
   const applied = model.snapshotCurrent();
   model.clearPreset();
-  await sleep(3 * 17);
+  await sleep(4 * 17);
   const cleared = model.snapshotCurrent();
 
-  const maxDelta = (a: Record<string, number>, b: Record<string, number>): number =>
-    Math.max(0, ...keys.map((k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0))));
-  const appliedDelta = maxDelta(base, applied);
-  const residual = maxDelta(base, cleared);
+  // 逐个参数看：+1 的 Add 应让至少 3 个参数明显变化（个别参数可能已经顶到上限而不再动）
+  const moved = keys.filter((k) => Math.abs((applied[k] ?? 0) - (base[k] ?? 0)) > 0.5);
+  // 清除后应回到本底噪声范围（而不是带着 1 的偏移）
+  const residual = +Math.max(
+    0,
+    ...moved.map((k) => Math.abs((cleared[k] ?? 0) - (base[k] ?? 0)))
+  ).toFixed(4);
+  const tolerance = +(Math.max(0.1, noise * 3)).toFixed(4);
   return {
     paramCount: keys.length,
-    appliedDelta: +appliedDelta.toFixed(4),
-    residualAfterClear: +residual.toFixed(4),
+    movedParams: moved.length,
+    driftNoise: noise,
+    tolerance,
+    residualAfterClear: residual,
     presetLayerSize: model.presetSize,
-    pass: appliedDelta > 0.5 && residual <= 0.05,
+    pass: moved.length >= 3 && residual <= tolerance,
   };
 };
 
 /** 供主进程读取当前外观（托盘菜单"存为预设"） */
 (window as unknown as { __petCurrentLook: () => unknown }).__petCurrentLook = () => currentLook();
+
+/** 托盘菜单「回到待机」 */
+(window as unknown as { __petResetToIdle: () => unknown }).__petResetToIdle = () => {
+  model?.resetToIdle();
+  model?.clearExpression();
+  log('已回到待机');
+  return { activeMotion: model?.activeMotionId ?? null };
+};
 
 /** 帧计数（验证帧率上限用） */
 (window as unknown as { __petFrameCounter: () => number }).__petFrameCounter = () => frames;

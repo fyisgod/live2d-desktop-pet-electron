@@ -1,0 +1,41 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "Model": "mini.model3.json",
+    "IdleAnimation": "idle.motion3.json",
+    "Icon": "icon.jpg"
+  },
+  "ModelSaveMetadata": { "LastSavedVTubeStudioVersion": "1.32.67" },
+  "Hotkeys": [
+    {
+      "Name": "外套F+1",
+      "Action": "ToggleExpression",
+      "File": "coat.exp3.json",
+      "Triggers": { "Trigger1": "V", "Trigger2": "N1" },
+      "FadeSecondsAmount": 0.3,
+      "StopsOnLastFrame": false
+    },
+    {
+      "Name": "贴纸Q1",
+      "Action": "ToggleExpression",
+      "File": "sticker.exp3.json",
+      "Triggers": { "Trigger1": "Q", "Trigger2": "" },
+      "FadeSecondsAmount": 0.2,
+      "StopsOnLastFrame": false
+    },
+    {
+      "Name": "打招呼A3",
+      "Action": "TriggerAnimation",
+      "File": "wave.motion3.json",
+      "Triggers": { "Trigger1": "A", "Trigger2": "N3" },
+      "FadeSecondsAmount": 0.5,
+      "StopsOnLastFrame": true
+    },
+    {
+      "Name": "改色橙发",
+      "Action": "ArtMeshColorPreset",
+      "File": "",
+      "Triggers": { "Trigger1": "V", "Trigger2": "N2" }
+    }
+  ]
+}

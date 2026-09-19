@@ -157,6 +157,15 @@ function importModel(opts) {
     const name = path.basename(p).replace(/\.motion3\.json$/i, '');
     motionByName.set(name, p);
   }
+  /** 读 motion3.json 的 Meta：判断这条动作是否被设计成循环（VTS 之外的模型靠它判断） */
+  const motionMeta = (p) => {
+    try {
+      const j = readJson(p);
+      return { loops: !!(j.Meta && j.Meta.Loop), duration: (j.Meta && j.Meta.Duration) || 0 };
+    } catch {
+      return { loops: false, duration: 0 };
+    }
+  };
 
   // 7) 组装动作表：VTS 热键优先（带触发键与显示名），再补上未被引用的文件
   const actions = [];
@@ -172,6 +181,7 @@ function importModel(opts) {
     if (!found) continue;
     if (isExp) usedExp.add(base);
     else usedMotion.add(base);
+    const meta = isMotion ? motionMeta(found) : { loops: false, duration: 0 };
     actions.push({
       id: base,
       label: hk.Name || base,
@@ -181,6 +191,8 @@ function importModel(opts) {
       vtsAction: hk.Action,
       fadeSeconds: hk.FadeSecondsAmount || 0.3,
       stopOnLastFrame: !!hk.StopsOnLastFrame,
+      loops: meta.loops,
+      duration: meta.duration,
     });
   }
   for (const [name, p] of expByName) {
@@ -189,7 +201,17 @@ function importModel(opts) {
   }
   for (const [name, p] of motionByName) {
     if (usedMotion.has(name)) continue;
-    actions.push({ id: name, label: name, kind: 'motion', file: rel(p), triggers: [], vtsAction: 'TriggerAnimation' });
+    const meta = motionMeta(p);
+    actions.push({
+      id: name,
+      label: name,
+      kind: 'motion',
+      file: rel(p),
+      triggers: [],
+      vtsAction: 'TriggerAnimation',
+      loops: meta.loops,
+      duration: meta.duration,
+    });
   }
 
   // 8) 识别"开关型"表情（只把一个参数置非零、Blend=Add/Overwrite）并按参数组归类
@@ -222,8 +244,24 @@ function importModel(opts) {
   }
 
   // 9) 待机 / 丢失捕捉动画
-  const idleFile = vtube && vtube.FileReferences && vtube.FileReferences.IdleAnimation;
-  const idleLostFile = vtube && vtube.FileReferences && vtube.FileReferences.IdleAnimationLost;
+  //    VTS 工程包从 vtube.json 拿；普通 Cubism 导出（Editor / 官方样例）没有这个文件，
+  //    退回按文件名识别 idle（否则这类模型会完全没有待机动作）。
+  let idleFile = vtube && vtube.FileReferences && vtube.FileReferences.IdleAnimation;
+  // VTS 里"跟踪丢失时的待机"键名是 IdleAnimationWhenTrackingLost（早期写成 IdleAnimationLost 取不到）
+  const idleLostFile =
+    vtube &&
+    vtube.FileReferences &&
+    (vtube.FileReferences.IdleAnimationWhenTrackingLost || vtube.FileReferences.IdleAnimationLost);
+  let idleSource = idleFile ? 'vtube.json' : null;
+  if (!idleFile) {
+    for (const [name, p] of motionByName) {
+      if (/idle|待机|まばたき|stand/i.test(name)) {
+        idleFile = rel(p);
+        idleSource = `文件名匹配「${name}」`;
+        break;
+      }
+    }
+  }
 
   // 10) 规范化 model3.json：原生 + 补 LipSync 组（原文件里是空的）
   const lipSyncIds = detectLipSyncParams(params);
@@ -315,7 +353,7 @@ function importModel(opts) {
     expressionCount: expFiles.length,
     actions,
     switches,
-    idle: idleFile ? { file: idleFile, lost: idleLostFile || null } : null,
+    idle: idleFile ? { file: idleFile, lost: idleLostFile || null, source: idleSource } : null,
     icon,
   };
   fs.writeFileSync(path.join(outDir, 'pack.json'), JSON.stringify(pack, null, 2), 'utf8');

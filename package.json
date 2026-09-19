@@ -11,8 +11,16 @@
     "build": "node tools/build.cjs",
     "import:model": "electron tools/import-cli.cjs",
     "import:model:node": "node tools/import-model.cjs",
+    "typecheck": "node tools/test-typecheck.cjs",
+    "test:importer": "node tools/test-importer.cjs",
+    "test:report": "node tools/test-report.cjs",
+    "test": "node tools/test-typecheck.cjs && node tools/test-importer.cjs",
+    "smoke": "node tools/ci-smoke.cjs",
     "selftest": "node tools/build.cjs && electron . --selftest",
     "start": "node tools/build.cjs && electron ."
+  },
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
     "electron": "^33.2.0",

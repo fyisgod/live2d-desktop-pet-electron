@@ -1,0 +1,19 @@
+{
+  "Version": 3,
+  "Parameters": [
+    { "Id": "ParamEyeLOpen", "Name": "左眼 开闭", "GroupId": "ParamGroup2" },
+    { "Id": "ParamEyeROpen", "Name": "右眼 开闭", "GroupId": "ParamGroup2" },
+    { "Id": "ParamMouthOpenY", "Name": "嘴 开闭", "GroupId": "ParamGroup3" },
+    { "Id": "ParamMouthForm", "Name": "嘴 变形", "GroupId": "ParamGroup3" },
+    { "Id": "Param100", "Name": "外套", "GroupId": "ParamGroup4" },
+    { "Id": "Param200", "Name": "贴纸", "GroupId": "ParamGroup5" }
+  ],
+  "ParameterGroups": [
+    { "Id": "ParamGroup2", "GroupId": "", "Name": "眼睛" },
+    { "Id": "ParamGroup3", "GroupId": "", "Name": "嘴巴" },
+    { "Id": "ParamGroup4", "GroupId": "", "Name": "服装" },
+    { "Id": "ParamGroup5", "GroupId": "", "Name": "物品开关" }
+  ],
+  "Parts": [{ "Id": "Part01", "Name": "头部" }],
+  "ArtMeshes": []
+}
