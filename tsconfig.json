@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@framework/*": ["vendor/cubism/Framework/src/*"]
+    },
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "vendor/cubism/Framework/src/**/*.ts"]
+}

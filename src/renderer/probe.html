@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>desktop-l2d probe</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #ff00ff; /* 纯品红：既是透明合成的对照色，也是"点击穿透到达"的探针 */
+        overflow: hidden;
+        font: 12px ui-monospace, Consolas, monospace;
+        color: #300;
+      }
+      #n {
+        position: absolute;
+        left: 6px;
+        top: 6px;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="n">probe clicks: 0</div>
+    <script>
+      let n = 0;
+      const el = document.getElementById('n');
+      window.addEventListener('mousedown', (e) => {
+        n++;
+        el.textContent = 'probe clicks: ' + n;
+        if (window.probe) window.probe.click(e.clientX, e.clientY);
+      });
+    </script>
+  </body>
+</html>

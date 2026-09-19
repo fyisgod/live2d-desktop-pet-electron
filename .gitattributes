@@ -1,0 +1,12 @@
+# 统一行尾：仓库内一律 LF，避免在 Windows 上产生"整文件改了行尾"的噪音 diff
+* text=auto eol=lf
+
+# 二进制资源不要做行尾/文本处理
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.moc3 binary
+*.woff binary
+*.woff2 binary

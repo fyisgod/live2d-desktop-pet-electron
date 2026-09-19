@@ -1,0 +1,24 @@
+# 用户模型：授权明确禁止分享/转售/上传，绝不入库（见 docs/DESIGN.md §7）
+model/
+
+# 导入产物（含从模型派生的降采样贴图）与本地设置/预设
+userdata/
+packs/
+*.pack.json
+
+# 构建与下载缓存
+.cache/
+out/
+dist/
+release/
+
+# 厂商 SDK：由 tools/fetch-sdk.cjs 从官方站点下载到本地，不随仓库分发（授权要求）
+vendor/cubism/
+
+# Node
+node_modules/
+
+# 杂项
+*.log
+.DS_Store
+Thumbs.db

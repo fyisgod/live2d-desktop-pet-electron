@@ -1,0 +1,22 @@
+{
+  "name": "desktop-l2d",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "把 Live2D (VTube Studio 导出) 模型变成桌面宠物的工具",
+  "main": "dist/main/main.cjs",
+  "scripts": {
+    "fetch-sdk": "node tools/fetch-sdk.cjs",
+    "vendor": "node tools/vendor-sdk.cjs",
+    "build": "node tools/build.cjs",
+    "import:model": "electron tools/import-cli.cjs",
+    "import:model:node": "node tools/import-model.cjs",
+    "selftest": "node tools/build.cjs && electron . --selftest",
+    "start": "node tools/build.cjs && electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.2"
+  }
+}
