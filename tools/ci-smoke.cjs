@@ -62,14 +62,38 @@ function checkPrerequisites() {
   return true;
 }
 
+/** 失败时把关键诊断打成 GitHub 注解（CI 日志需要凭据，注解可匿名读取） */
+function diagnose() {
+  const dir = path.join(root, 'out', 'm0-report');
+  if (!fs.existsSync(dir)) {
+    console.log('::error title=冒烟失败::自检没有产出报告 out/m0-report/，很可能是 Electron 根本没起来');
+    return;
+  }
+  const files = fs.readdirSync(dir).filter((f) => f.startsWith('report-') && f.endsWith('.json'));
+  if (!files.length) {
+    console.log('::error title=冒烟失败::没有 report-*.json');
+    return;
+  }
+  const latest = files
+    .map((f) => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .sort((a, b) => b.m - a.m)[0].f;
+  const r = JSON.parse(fs.readFileSync(path.join(dir, latest), 'utf8'));
+  const load = (r.renderer && r.renderer.load) || {};
+  const logs = (r.rendererLogs || []).slice(-6).join(' | ').slice(0, 900);
+  console.log(
+    `::error title=冒烟诊断::renderer.ok=${r.renderer && r.renderer.ok} mocVersion=${load.mocVersion} drawables=${load.drawables} ` +
+      `coverage=${r.renderer && r.renderer.canvasAlpha && r.renderer.canvasAlpha.coverage} gl=${JSON.stringify(
+        (r.renderer && r.renderer.gl && (r.renderer.gl.error || r.renderer.gl.renderer)) || null
+      )} 日志尾部: ${logs}`
+  );
+}
+
 function runElectron(scriptArgs, label) {
   const electronPath = require('electron'); // 纯 Node 下返回可执行文件路径
   const args = Array.isArray(scriptArgs) ? scriptArgs : [scriptArgs];
   console.log(`\n=== ${label} ===\n> electron ${args.join(' ')}`);
   const res = spawnSync(electronPath, args, { cwd: root, stdio: 'inherit' });
-  if (res.status !== 0) {
-    throw new Error(`${label} 失败，退出码 ${res.status}`);
-  }
+  return res.status;
 }
 
 function main() {
@@ -80,28 +104,50 @@ function main() {
   const modelDir = findSampleModel();
   console.log(`示例模型: ${path.relative(root, modelDir)}`);
 
-  runElectron(
+  const importStatus = runElectron(
     [path.join('tools', 'import-cli.cjs'), modelDir, '--tex', '2048'],
     '导入示例模型（含贴图降采样落盘）'
   );
+  if (importStatus !== 0) throw new Error(`导入示例模型失败，退出码 ${importStatus}`);
 
-  runElectron(
-    ['.', '--selftest', '--seconds', seconds, '--no-input-test', '--no-transparency-test'],
-    '运行桌宠自检（跳过需要真实桌面的整屏取样与输入注入）'
-  );
+  const selftestArgs = [
+    '.',
+    '--selftest',
+    '--seconds',
+    seconds,
+    '--no-input-test',
+    '--no-transparency-test',
+  ];
+  let status = runElectron(selftestArgs, '运行桌宠自检（跳过需要真实桌面的整屏取样与输入注入）');
+  if (status !== 0) {
+    // 无 GPU 的 runner 上 ANGLE/WebGL2 可能初始化失败；用软件渲染再试一次
+    console.log('\n::warning title=自检首次失败::可能是 runner 无 GPU，改用 --disable-gpu（软件渲染）重试一次');
+    status = runElectron(
+      ['--disable-gpu', ...selftestArgs],
+      '重试：软件渲染（--disable-gpu）'
+    );
+  }
+  if (status !== 0) {
+    diagnose();
+    throw new Error(`自检失败，退出码 ${status}`);
+  }
 
   // 断言自检报告
   const res = spawnSync(process.execPath, [path.join('tools', 'test-report.cjs')], {
     cwd: root,
     stdio: 'inherit',
   });
-  if (res.status !== 0) throw new Error('自检报告断言失败');
+  if (res.status !== 0) {
+    diagnose();
+    throw new Error('自检报告断言失败');
+  }
   console.log('\n冒烟通过');
 }
 
 try {
   main();
 } catch (e) {
+  console.log(`::error title=冒烟失败::${e.message}`);
   console.error(`\n冒烟失败: ${e.message}`);
   process.exit(1);
 }

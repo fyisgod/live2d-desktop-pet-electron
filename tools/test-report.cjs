@@ -100,6 +100,11 @@ console.log(`模型：${load.mocVersion ? 'moc3 v' + load.mocVersion : '?'} | ${
 for (const x of results) {
   const mark = x.status === 'PASS' ? '✓' : x.status === 'SKIP' ? '-' : '✗';
   console.log(`  ${mark} [${x.status}] ${x.name}${x.detail ? ' → ' + x.detail : ''}`);
+  // 同时输出 GitHub 注解：CI 日志需要凭据才能读，注解可以匿名从 API 取到，
+  // 这是把"为什么失败"带出流水线的唯一通道。
+  if (x.status === 'FAIL') {
+    console.log(`::error title=自检断言失败：${x.name}::${x.detail || '(无细节)'}`);
+  }
 }
 const failed = results.filter((x) => x.status === 'FAIL');
 const skipped = results.filter((x) => x.status === 'SKIP');
